@@ -8,7 +8,6 @@ import java.util.HashMap;
 
 import com.oracle.truffle.api.Arguments;
 import com.oracle.truffle.api.CallTarget;
-import com.oracle.truffle.api.CompilerDirectives.SlowPath;
 import com.oracle.truffle.api.ExactMath;
 import com.oracle.truffle.api.Truffle;
 import com.oracle.truffle.api.TruffleRuntime;
@@ -17,7 +16,7 @@ import com.oracle.truffle.api.frame.FrameSlot;
 import com.oracle.truffle.api.frame.FrameSlotKind;
 import com.oracle.truffle.api.frame.FrameSlotTypeException;
 import com.oracle.truffle.api.frame.VirtualFrame;
-import com.oracle.truffle.api.impl.DefaultVirtualFrame;
+import com.oracle.truffle.api.nodes.ExplodeLoop;
 import com.oracle.truffle.api.nodes.NodeUtil;
 
 import fr.umlv.ninal.lang.List;
@@ -55,6 +54,7 @@ public class Interpreter {
     }
 
     @Override
+    @ExplodeLoop
     public Object eval(VirtualFrame frame) {
       Object[] values = new Object[valueNodes.length];
       for(int i=0; i<values.length; i++) {
@@ -80,29 +80,27 @@ public class Interpreter {
   
   static class FunctionNode extends com.oracle.truffle.api.nodes.RootNode {
     private final Symbol symbol;
-    private final FrameSlot[] slots;
+    @Children
+    private final ParameterNode[] parameterNodes;
     @Child
     private final Node bodyNode;
     
-    FunctionNode(Symbol symbol, FrameSlot[] slots, Node bodyNode) {
+    FunctionNode(Symbol symbol, ParameterNode[] parameterNodes, Node bodyNode) {
       this.symbol = symbol;
-      this.slots = slots;
+      this.parameterNodes = adoptChildren(parameterNodes);
       this.bodyNode = adoptChild(bodyNode);
     }
     
     @Override
+    @ExplodeLoop
     public Object execute(VirtualFrame frame) {
       ArrayArguments arguments = frame.getArguments(ArrayArguments.class);
-      if (slots.length != arguments.size()) {
+      if (parameterNodes.length != arguments.size()) {
         throw new RuntimeException("invalid number of arguments for function call " + symbol);
       }
       
-      for(int i=0; i<arguments.size(); i++) {
-        try {
-          frame.setObject(slots[i], arguments.get(i));
-        } catch (FrameSlotTypeException e) {
-          throw new RuntimeException(e);
-        }
+      for(int i = 0; i < parameterNodes.length; i++) {
+        parameterNodes[i].setObject(frame, arguments.get(i));
       }
       return bodyNode.eval(frame);
     }
@@ -111,13 +109,15 @@ public class Interpreter {
   /*non-static*/ class DefNode extends Node {
     private final Symbol name;
     private final FrameDescriptor functionFrameDescriptor;
-    private final FrameSlot[] slots;
+    @Children
+    private final ParameterNode[] parameterNodes;
+    @Child
     private final Node bodyNode;
     
-    DefNode(Symbol name, FrameDescriptor functionFrameDescriptor, FrameSlot[] slots, Node bodyNode) {
+    DefNode(Symbol name, FrameDescriptor functionFrameDescriptor, ParameterNode[] parameterNodes, Node bodyNode) {
       this.name = name;
       this.functionFrameDescriptor = functionFrameDescriptor;
-      this.slots = slots;
+      this.parameterNodes = adoptChildren(parameterNodes);
       this.bodyNode = adoptChild(bodyNode);
     }
 
@@ -127,7 +127,8 @@ public class Interpreter {
     
     @Override
     public Object eval(VirtualFrame frame) {
-      FunctionNode functionNode = new FunctionNode(name, slots, bodyNode);
+      FunctionNode functionNode = new FunctionNode(name, parameterNodes, bodyNode);
+      NodeUtil.printTree(System.out, functionNode);
       CallTarget callTarget = Truffle.getRuntime().createCallTarget(functionNode, functionFrameDescriptor);
       callTargetMap.put(name, callTarget);
       
@@ -146,6 +147,7 @@ public class Interpreter {
     }
 
     @Override
+    @ExplodeLoop
     public Object eval(VirtualFrame frame) {
       Object[] arguments = new Object[argumentNodes.length];
       for(int i=0; i<argumentNodes.length; i++) {
@@ -154,6 +156,22 @@ public class Interpreter {
       
       CallTarget callTarget = callTargetMap.get(name);
       return callTarget.call(frame.pack(), new ArrayArguments(arguments));
+    }
+  }
+  
+  static class ParameterNode extends com.oracle.truffle.api.nodes.Node {
+    private final FrameSlot slot;
+
+    ParameterNode(FrameSlot slot) {
+      this.slot = slot;
+    }
+    
+    void setObject(VirtualFrame frame, Object value) {
+      try {
+        frame.setObject(slot, value);
+      } catch (FrameSlotTypeException e) {
+        throw new RuntimeException(e);
+      }
     }
   }
   
@@ -502,14 +520,13 @@ public class Interpreter {
       Symbol defSymbol = (Symbol)list.get(1);
       FrameDescriptor functionFrameDescriptor = new FrameDescriptor();
       List parameters = (List)list.get(2);
-      FrameSlot[] slots = new FrameSlot[parameters.size()];
+      ParameterNode[] parameterNodes = new ParameterNode[parameters.size()];
       for(int i = 0; i < parameters.size(); i++) {
         Symbol parameter = (Symbol) parameters.get(i);
-        slots[i] = functionFrameDescriptor.addFrameSlot(parameter, FrameSlotKind.Object);
+        parameterNodes[i] = new ParameterNode(functionFrameDescriptor.addFrameSlot(parameter, FrameSlotKind.Object));
       }
       Node body = createAST(list.get(3), functionFrameDescriptor);
-      NodeUtil.printTree(System.out, body);
-      return createDef(defSymbol, functionFrameDescriptor, slots, body);
+      return createDef(defSymbol, functionFrameDescriptor, parameterNodes, body);
     }
     case "if":
       checkArguments(list, "value", "statement", "statement");
@@ -559,8 +576,8 @@ public class Interpreter {
     return new LiteralListNode(nodes);
   }
   
-  private Node createDef(Symbol name, FrameDescriptor functionFrameDescriptor, FrameSlot[] slots, Node bodyNode) {
-    return new DefNode(name, functionFrameDescriptor, slots, bodyNode);
+  private Node createDef(Symbol name, FrameDescriptor functionFrameDescriptor, ParameterNode[] parameterNodes, Node bodyNode) {
+    return new DefNode(name, functionFrameDescriptor, parameterNodes, bodyNode);
   }
   private static Node createVarStore(FrameSlot slot, Node init) {
     return new VarStoreNode(slot, init);
