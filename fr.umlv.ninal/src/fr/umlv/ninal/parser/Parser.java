@@ -29,7 +29,7 @@ public class Parser {
       if (c > 127) { // FIXME, support UTF8
         throw new ParsingException("not an ASCII char !");
       }
-      if (skipSpace && (c == ' ' || c == '\t' || c == '\r' || c == '\n')) {
+      if (skipSpace && (c == ' ' || c == '\t' || c == '\r' || c == '\n' || c == ',')) {
         index++;
         continue;
       }
@@ -133,7 +133,7 @@ public class Parser {
         index++;
         continue;
         
-      case ')': case ' ': case '\t': case '\r': case '\n':
+      case ')': case ' ': case '\t': case '\r': case '\n': case ',':
         return new Symbol(builder.toString());
       }
     }
