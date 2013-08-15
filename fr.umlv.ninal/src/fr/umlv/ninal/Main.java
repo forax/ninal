@@ -19,7 +19,7 @@ public class Main {
     }*/
     
     Interpreter interpreter = new Interpreter();
-    interpreter.interpret(Paths.get("ninal/test.ninal"));
+    interpreter.interpret(Paths.get(args[0]));
   }
 
 }
