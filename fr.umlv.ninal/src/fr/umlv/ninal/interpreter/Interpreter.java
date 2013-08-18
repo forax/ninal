@@ -41,6 +41,7 @@ public class Interpreter {
       typeStateStable.check();
       return typeState == state;
     } catch (InvalidAssumptionException e) {
+      System.out.println("assumption invalidation !");
       return typeState == state;
     }
   }
@@ -67,6 +68,7 @@ public class Interpreter {
       }
       CompilerDirectives.transferToInterpreter();
       typeState = state;
+      typeStateStable.invalidate();
       typeStateStable = Truffle.getRuntime().createAssumption();
       System.out.println(this  + " -> " + state);
     }
