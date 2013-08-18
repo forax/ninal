@@ -1,0 +1,12 @@
+(def add (x,y)
+  (+ x y)
+)
+
+(block
+  (var sum 0)
+  (range i 1 100000
+    (set sum (add sum i))
+  )
+  (print sum)
+)
+
